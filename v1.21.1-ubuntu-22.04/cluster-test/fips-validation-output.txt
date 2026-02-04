@@ -1,0 +1,20 @@
+========================================
+FIPS Startup Validation
+========================================
+
+[1/3] Checking FIPS compile-time configuration...
+      ✓ FIPS mode: ENABLED
+      ✓ FIPS version: 5
+
+[2/3] Running FIPS Known Answer Tests (CAST)...
+      ✓ FIPS CAST: PASSED
+
+[3/3] Validating SHA-256 cryptographic operation...
+      ✓ SHA-256 test vector: PASSED
+
+========================================
+✓ FIPS VALIDATION PASSED
+========================================
+FIPS 140-3 compliant cryptography verified
+Container startup authorized
+

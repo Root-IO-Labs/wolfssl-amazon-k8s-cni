@@ -1,0 +1,457 @@
+---
+# AWS VPC CNI (aws-node) v1.21.1 FIPS-enabled DaemonSet
+# This is a complete example for deploying the FIPS-compliant aws-node DaemonSet
+#
+# Prerequisites:
+#   1. ServiceAccount 'aws-node' with appropriate IAM role
+#   2. IAM role must have EC2 ENI management permissions
+#   3. Nodes must be EC2 instances with ENI support
+#
+# Usage:
+#   kubectl apply -f kubernetes-daemonset.yaml
+#
+# Notes:
+#   - This DaemonSet requires privileged mode and hostNetwork
+#   - Update the image tag to match your registry
+#   - Adjust environment variables based on your requirements
+
+---
+# ServiceAccount for aws-node
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aws-node
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: aws-node
+    app.kubernetes.io/instance: aws-vpc-cni
+    app.kubernetes.io/version: "v1.21.1-fips"
+    app.kubernetes.io/component: networking
+    app.kubernetes.io/part-of: aws-vpc-cni
+
+---
+# ClusterRole for aws-node
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aws-node
+  labels:
+    app.kubernetes.io/name: aws-node
+rules:
+  - apiGroups:
+      - crd.k8s.amazonaws.com
+    resources:
+      - eniconfigs
+    verbs: ["list", "watch", "get"]
+  - apiGroups: [""]
+    resources:
+      - namespaces
+    verbs: ["list", "watch", "get"]
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs: ["list", "watch", "get"]
+  - apiGroups: [""]
+    resources:
+      - nodes
+    verbs: ["list", "watch", "get", "patch"]
+  - apiGroups: ["extensions"]
+    resources:
+      - '*'
+    verbs: ["list", "watch"]
+
+---
+# ClusterRoleBinding for aws-node
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aws-node
+  labels:
+    app.kubernetes.io/name: aws-node
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: aws-node
+subjects:
+  - kind: ServiceAccount
+    name: aws-node
+    namespace: kube-system
+
+---
+# DaemonSet for aws-node
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: aws-node
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: aws-node
+    app.kubernetes.io/instance: aws-vpc-cni
+    app.kubernetes.io/version: "v1.21.1-fips"
+    app.kubernetes.io/component: networking
+    app.kubernetes.io/part-of: aws-vpc-cni
+    k8s-app: aws-node
+spec:
+  selector:
+    matchLabels:
+      k8s-app: aws-node
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: "10%"
+  template:
+    metadata:
+      labels:
+        k8s-app: aws-node
+        app.kubernetes.io/name: aws-node
+        app.kubernetes.io/instance: aws-vpc-cni
+    spec:
+      # IMPORTANT: aws-node must run with hostNetwork and privileged mode
+      hostNetwork: true
+      priorityClassName: system-node-critical
+      serviceAccountName: aws-node
+
+      # Tolerations to run on all nodes including control plane
+      tolerations:
+        - operator: Exists
+
+      # Node affinity (optional - runs on all Linux nodes by default)
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                      - amd64
+                      - arm64
+
+      # Init containers
+      initContainers:
+        # aws-vpc-cni-init: Copies CNI binaries and configures kernel parameters
+        # NOTE: This should also use FIPS-enabled image (amazon-k8s-cni-init-fips)
+        - name: aws-vpc-cni-init
+          image: amazon-k8s-cni-init-fips:v1.21.1-ubuntu-22.04
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          env:
+            - name: DISABLE_TCP_EARLY_DEMUX
+              value: "false"
+            - name: ENABLE_IPv6
+              value: "false"
+            - name: ENABLE_V6_EGRESS
+              value: "false"
+          volumeMounts:
+            - name: host-cni-bin
+              mountPath: /host/opt/cni/bin
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+
+      # Main container
+      containers:
+        - name: aws-node
+          # IMPORTANT: Update this image tag to match your registry
+          image: rootioinc/amazon-k8s-cni:v1.21.1-ubuntu-22.04-fips
+          imagePullPolicy: IfNotPresent
+
+          # CRITICAL: Must run as privileged for ENI management
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+
+          # Ports for introspection and metrics
+          ports:
+            - name: metrics
+              containerPort: 61678
+              protocol: TCP
+            - name: introspection
+              containerPort: 61679
+              protocol: TCP
+
+          # Liveness probe
+          livenessProbe:
+            exec:
+              command:
+                - /app/grpc-health-probe
+                - -addr=:50051
+                - -connect-timeout=5s
+                - -rpc-timeout=5s
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          # Readiness probe
+          readinessProbe:
+            exec:
+              command:
+                - /app/grpc-health-probe
+                - -addr=:50051
+                - -connect-timeout=5s
+                - -rpc-timeout=5s
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Resource requests and limits
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          # Environment variables
+          env:
+            # Kubernetes node information
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+
+            # AWS VPC CNI configuration
+            - name: CLUSTER_NAME
+              value: "my-cluster"  # CHANGE THIS to your cluster name
+
+            - name: AWS_VPC_K8S_CNI_LOGLEVEL
+              value: "DEBUG"
+
+            - name: AWS_VPC_K8S_CNI_LOG_FILE
+              value: "/var/log/aws-routed-eni/ipamd.log"
+
+            - name: AWS_VPC_K8S_PLUGIN_LOG_FILE
+              value: "/var/log/aws-routed-eni/plugin.log"
+
+            - name: AWS_VPC_K8S_PLUGIN_LOG_LEVEL
+              value: "DEBUG"
+
+            - name: AWS_VPC_ENI_MTU
+              value: "9001"
+
+            - name: AWS_VPC_K8S_CNI_VETHPREFIX
+              value: "eni"
+
+            - name: AWS_VPC_K8S_CNI_EXTERNALSNAT
+              value: "false"
+
+            - name: AWS_VPC_K8S_CNI_RANDOMIZESNAT
+              value: "prng"
+
+            - name: AWS_VPC_K8S_CNI_EXCLUDE_SNAT_CIDRS
+              value: ""
+
+            - name: WARM_ENI_TARGET
+              value: "1"
+
+            - name: WARM_IP_TARGET
+              value: "0"
+
+            - name: MINIMUM_IP_TARGET
+              value: "0"
+
+            - name: WARM_PREFIX_TARGET
+              value: "0"
+
+            # Pod ENI / Security Groups for Pods
+            - name: ENABLE_POD_ENI
+              value: "false"
+
+            - name: POD_SECURITY_GROUP_ENFORCING_MODE
+              value: "standard"
+
+            # IPv6 configuration
+            - name: ENABLE_IPv6
+              value: "false"
+
+            - name: ENABLE_PREFIX_DELEGATION
+              value: "false"
+
+            # Monitoring
+            - name: DISABLE_INTROSPECTION
+              value: "false"
+
+            - name: DISABLE_METRICS
+              value: "false"
+
+            - name: ENABLE_POD_ENI_METRICS
+              value: "true"
+
+            # Network policy
+            - name: ENABLE_NETWORK_POLICY
+              value: "false"
+
+            # FIPS environment variables (set in Dockerfile, but can override)
+            # - name: OPENSSL_CONF
+            #   value: "/usr/local/openssl/ssl/openssl.cnf"
+            # - name: OPENSSL_MODULES
+            #   value: "/usr/local/openssl/lib64/ossl-modules"
+
+          # Volume mounts
+          volumeMounts:
+            # CNI binaries
+            - name: host-cni-bin
+              mountPath: /host/opt/cni/bin
+
+            # CNI configuration
+            - name: host-cni-net
+              mountPath: /host/etc/cni/net.d
+
+            # Logs
+            - name: log-dir
+              mountPath: /var/log/aws-routed-eni
+              readOnly: false
+
+            # Docker socket (for container runtime detection)
+            - name: dockershim
+              mountPath: /var/run/dockershim.sock
+              readOnly: true
+
+            # containerd socket (alternative to dockershim)
+            - name: containerd-sock
+              mountPath: /run/containerd/containerd.sock
+              readOnly: true
+
+            # xtables lock
+            - name: xtables-lock
+              mountPath: /run/xtables.lock
+
+      # Volumes
+      volumes:
+        # CNI binaries directory
+        - name: host-cni-bin
+          hostPath:
+            path: /opt/cni/bin
+            type: Directory
+
+        # CNI configuration directory
+        - name: host-cni-net
+          hostPath:
+            path: /etc/cni/net.d
+            type: Directory
+
+        # Log directory
+        - name: log-dir
+          hostPath:
+            path: /var/log/aws-routed-eni
+            type: DirectoryOrCreate
+
+        # Docker socket
+        - name: dockershim
+          hostPath:
+            path: /var/run/dockershim.sock
+            type: Socket
+
+        # containerd socket (for containerd runtime)
+        - name: containerd-sock
+          hostPath:
+            path: /run/containerd/containerd.sock
+            type: Socket
+
+        # xtables lock file
+        - name: xtables-lock
+          hostPath:
+            path: /run/xtables.lock
+            type: FileOrCreate
+
+---
+# ConfigMap for ENI configuration (optional)
+# This ConfigMap is only needed if you use ENIConfig CRD for custom networking
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: amazon-vpc-cni
+#   namespace: kube-system
+# data:
+#   enable-windows-ipam: "false"
+#   enable-network-policy: "false"
+
+---
+# Example ENIConfig CRD (optional)
+# Only needed for custom networking scenarios (e.g., different subnets per AZ)
+# apiVersion: crd.k8s.amazonaws.com/v1alpha1
+# kind: ENIConfig
+# metadata:
+#   name: us-west-2a
+# spec:
+#   securityGroups:
+#     - sg-0123456789abcdef0
+#   subnet: subnet-0123456789abcdef0
+
+---
+# Notes and Usage Instructions:
+#
+# 1. Update these values before deploying:
+#    - spec.template.spec.containers[0].image: Your FIPS image tag
+#    - env.CLUSTER_NAME: Your cluster name
+#    - env.AWS_VPC_K8S_CNI_LOGLEVEL: Set to INFO or WARN for production
+#
+# 2. IAM Role Requirements:
+#    The ServiceAccount 'aws-node' must have an IAM role attached with these permissions:
+#    - ec2:AttachNetworkInterface
+#    - ec2:CreateNetworkInterface
+#    - ec2:DeleteNetworkInterface
+#    - ec2:DescribeInstances
+#    - ec2:DescribeNetworkInterfaces
+#    - ec2:DetachNetworkInterface
+#    - ec2:ModifyNetworkInterfaceAttribute
+#    - ec2:AssignPrivateIpAddresses
+#    - ec2:UnassignPrivateIpAddresses
+#
+#    For EKS, use IRSA (IAM Roles for Service Accounts):
+#    eksctl create iamserviceaccount \
+#      --name aws-node \
+#      --namespace kube-system \
+#      --cluster my-cluster \
+#      --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy \
+#      --approve
+#
+# 3. Init Container:
+#    The init container (aws-vpc-cni-init) should also use the FIPS-enabled image.
+#    If you don't have the FIPS init image, you can use the standard one,
+#    but note that kernel parameter configuration will not use FIPS crypto.
+#
+# 4. Resource Tuning:
+#    Adjust CPU/memory limits based on cluster size:
+#    - Small clusters (<50 nodes): 100m CPU, 256Mi memory
+#    - Medium clusters (50-200 nodes): 250m CPU, 384Mi memory
+#    - Large clusters (>200 nodes): 500m CPU, 512Mi memory
+#
+# 5. Monitoring:
+#    - Metrics endpoint: http://<node-ip>:61678/metrics
+#    - Introspection endpoint: http://<node-ip>:61679/v1/enis
+#    - Logs: /var/log/aws-routed-eni/ipamd.log on host
+#
+# 6. Verification:
+#    After deployment, verify FIPS mode:
+#    kubectl exec -n kube-system <aws-node-pod> -- \
+#      openssl list -providers
+#
+#    Should show wolfprov provider active.
+#
+# 7. Troubleshooting:
+#    - Check logs: kubectl logs -n kube-system -l k8s-app=aws-node
+#    - Describe pod: kubectl describe pod -n kube-system <aws-node-pod>
+#    - Check IAM role: kubectl describe sa -n kube-system aws-node
+#    - Verify ENIs: kubectl exec -n kube-system <aws-node-pod> -- \
+#        curl http://localhost:61679/v1/enis

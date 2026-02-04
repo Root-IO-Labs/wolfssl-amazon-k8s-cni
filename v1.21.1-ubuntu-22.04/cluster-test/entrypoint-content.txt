@@ -1,0 +1,11 @@
+Entrypoint Script Analysis
+==========================
+
+The deployed image uses the standard entrypoint.sh script with:
+- FIPS environment validation
+- wolfProvider activation checks
+- Standard CNI initialization
+- NO custom mount fix scripts
+- Default AWS VPC CNI configuration
+
+This confirms the image is running with DEFAULT configuration (no mount fix modifications).
