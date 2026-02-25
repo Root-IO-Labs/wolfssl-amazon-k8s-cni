@@ -13,12 +13,6 @@ This directory contains a FIPS 140-3 compliant Docker image for AWS VPC CNI (aws
 
 This FIPS-enabled version ensures all cryptographic operations (TLS connections to AWS APIs, EC2 metadata, etc.) use FIPS 140-3 validated cryptography.
 
-### Build Variants
-
-Two Dockerfiles are provided:
-- **`Dockerfile`** - FIPS 140-3 compliant image
-- **`Dockerfile.hardened`** - FIPS 140-3 compliant + DISA STIG and CIS security hardening
-
 ## Architecture
 
 ```
@@ -60,13 +54,11 @@ This image contains 5 FIPS-enabled binaries:
 Before building, ensure you have these files in this directory:
 
 - ✅ `Dockerfile` - Multi-stage FIPS build (~800 lines, 6 stages)
-- ✅ `Dockerfile.hardened` - Multi-stage FIPS + STIG/CIS hardened build
 - ✅ `openssl-wolfprov.cnf` - OpenSSL configuration with wolfProvider
 - ✅ `fips-startup-check.c` - wolfSSL FIPS integrity verification utility
 - ✅ `entrypoint.sh` - FIPS validation wrapper script
 - ✅ `wolfssl_password.txt` - Password for wolfSSL FIPS commercial package (**SECRET**)
 - ✅ `build.sh` - Build automation script
-- ✅ `build-hardened.sh` - Build automation script for Dockerfile.hardened
 
 ### Required Access
 
@@ -88,7 +80,7 @@ Before building, ensure you have these files in this directory:
 # Make build script executable
 chmod +x build.sh
 
-# Build the image
+# Run the build
 ./build.sh
 
 # Build with custom tag
@@ -96,18 +88,6 @@ chmod +x build.sh
 
 # Build and push to registry
 ./build.sh --push --registry my-registry.com
-```
-
-### Building Hardened Variant (Dockerfile.hardened)
-
-To build with DISA STIG and CIS hardening:
-
-```bash
-# Make build script executable  
-chmod +x build-hardened.sh
-
-# Build hardened image
-./build-hardened.sh
 ```
 
 ### Manual Build
@@ -125,15 +105,6 @@ docker buildx build \
   --secret id=wolfssl_password,src=wolfssl_password.txt \
   -t amazon-k8s-cni-fips:v1.21.1-ubuntu-22.04 \
   -f Dockerfile .
-```
-
-For hardened build:
-
-```bash
-docker buildx build \
-  --secret id=wolfssl_password,src=wolfssl_password.txt \
-  -t amazon-k8s-cni:v1.21.1-ubuntu-22.04-fips \
-  -f Dockerfile.hardened .
 ```
 
 **Build Time**: Approximately 50-60 minutes (most time spent building golang-fips/go toolchain ~30-40 min)
@@ -266,7 +237,7 @@ spec:
 
 #### FIPS-Specific Environment Variables
 
-These are automatically set in both Dockerfiles:
+These are automatically set in the Dockerfile:
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
@@ -450,16 +421,40 @@ docker run --rm --entrypoint=/bin/bash \
 
 This FIPS image differs from the standard AWS VPC CNI image in these ways:
 
-| Aspect | Standard Image | FIPS Image | FIPS Image (Dockerfile.hardened) |
-|--------|----------------|------------|----------------------------------|
-| **Base Image** | Amazon Linux 2 | Ubuntu 22.04 | Ubuntu 22.04 |
-| **CGO** | `CGO_ENABLED=0` (static) | `CGO_ENABLED=1` (dynamic) | `CGO_ENABLED=1` (dynamic) |
-| **Crypto Library** | Standard Go crypto | wolfSSL FIPS v5 via golang-fips/go | wolfSSL FIPS v5 via golang-fips/go |
-| **OpenSSL** | System OpenSSL | Custom OpenSSL 3.0.15 + wolfProvider | Custom OpenSSL 3.0.15 + wolfProvider |
-| **Non-FIPS Libs** | Present (GnuTLS, Nettle) | Removed completely | Removed completely |
-| **Binary Size** | Smaller (~100MB) | Larger (~200MB) due to FIPS libraries | Larger (~200MB) due to FIPS libraries |
-| **FIPS Compliance** | No | Yes (FIPS 140-3 Certificate #4718) | Yes (FIPS 140-3 Certificate #4718) |
-| **STIG/CIS** | No | No | Yes (DISA STIG + CIS hardening) |
+| Aspect | Standard Image | FIPS Image |
+|--------|----------------|------------|
+| **Base Image** | Amazon Linux 2 | Ubuntu 22.04 |
+| **CGO** | `CGO_ENABLED=0` (static) | `CGO_ENABLED=1` (dynamic) |
+| **Crypto Library** | Standard Go crypto | wolfSSL FIPS v5 via golang-fips/go |
+| **OpenSSL** | System OpenSSL | Ubuntu System OpenSSL 3.0.2 + wolfProvider |
+| **Non-FIPS Libs** | Present (GnuTLS, Nettle) | Removed completely |
+| **Binary Size** | Smaller (~100MB) | Larger (~200MB) due to FIPS libraries |
+| **FIPS Compliance** | No | Yes (FIPS 140-3 Certificate #4718) |
+| **TLS 1.3 Ciphers** | All ciphers | Only FIPS-approved (ChaCha20 removed) |
+| **golang.org/x/crypto** | Present | Bypassed for TLS (golang-fips intercepts) |
+
+### golang.org/x/crypto Handling
+
+**Important Note on FIPS Compliance:**
+
+golang-fips/go intercepts all `crypto/*` package calls and routes them through OpenSSL → wolfProvider → wolfSSL FIPS. However, `golang.org/x/crypto` is an external package that bypasses this interception.
+
+**Mitigation for TLS 1.3:**
+
+TLS 1.3 ChaCha20-Poly1305 cipher suite uses `golang.org/x/crypto/chacha20poly1305`, which would bypass FIPS validation. To ensure FIPS compliance:
+
+1. **Removal**: ChaCha20-Poly1305 cipher removed from `crypto/tls/cipher_suites.go` during golang-fips build
+2. **Result**: TLS 1.3 connections only use FIPS-approved AES-GCM ciphers (routed through FIPS modules)
+3. **Verification**: Binary strings contain only AES-GCM references, no ChaCha20 code present
+
+**AWS VPC CNI Context:**
+
+The AWS VPC CNI application does not directly use `golang.org/x/crypto` for cryptographic operations. All TLS connections (to Kubernetes API server, AWS EC2 metadata service) use the standard `crypto/tls` package, which is FIPS-compliant after ChaCha20 removal.
+
+**Build-time Enforcement:**
+- `GOTOOLCHAIN=local`: Prevents Go version changes
+- `GOLANG_FIPS=1`: Enables FIPS mode in golang-fips
+- `GOPROXY=direct`: Avoids ECDSA verification issues
 
 ## Compatibility
 
@@ -493,16 +488,6 @@ Compatible with Kubernetes versions supported by AWS VPC CNI v1.21.1:
 - ✅ Graviton instances (ARM64 - requires separate build for ARM64)
 
 ## Security Considerations
-
-### Dockerfile.hardened Security Controls
-
-The `Dockerfile.hardened` variant includes DISA STIG and CIS security hardening:
-
-- Removal of unnecessary packages and services
-- Secure file permissions
-- Kernel parameter hardening
-- Audit logging configuration
-- Filesystem hardening
 
 ### Running as Root
 
@@ -546,10 +531,6 @@ After a successful build, you'll have:
 - Docker image: `amazon-k8s-cni-fips:v1.21.1-ubuntu-22.04`
 - Size: ~500-600MB (includes all FIPS libraries and networking tools)
 - Layers: 35+ layers (multi-stage build optimized)
-
-For hardened build (Dockerfile.hardened):
-- Docker image: `amazon-k8s-cni:v1.21.1-ubuntu-22.04-fips`
-- Includes STIG/CIS security hardening
 
 ## References
 

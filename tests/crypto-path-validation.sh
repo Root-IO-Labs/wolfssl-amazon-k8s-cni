@@ -116,7 +116,7 @@ echo ""
 # Test Suite 1: Multi-Binary Linkage Verification
 ################################################################################
 echo "================================================================================"
-echo "[1/6] Multi-Binary Linkage Verification"
+echo "[1/7] Multi-Binary Linkage Verification"
 echo "================================================================================"
 echo ""
 echo "Verifying all 5 aws-vpc-cni binaries link to FIPS OpenSSL..."
@@ -145,7 +145,7 @@ echo ""
 # Test Suite 2: Environment Configuration
 ################################################################################
 echo "================================================================================"
-echo "[2/6] Environment Configuration"
+echo "[2/7] Environment Configuration"
 echo "================================================================================"
 echo ""
 echo "Verifying FIPS environment variables are properly set..."
@@ -153,19 +153,18 @@ echo ""
 
 test_check_with_output "OPENSSL_CONF is set" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'env | grep OPENSSL_CONF'" \
-    "OPENSSL_CONF=/usr/local/openssl/ssl/openssl.cnf"
+    "OPENSSL_CONF=/etc/ssl/openssl.cnf"
 
-test_check_with_output "OPENSSL_MODULES is set" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'env | grep OPENSSL_MODULES'" \
-    "OPENSSL_MODULES=/usr/local/openssl/lib64/ossl-modules"
+test_check "wolfProvider module in system location" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -f /usr/lib/x86_64-linux-gnu/ossl-modules/libwolfprov.so'"
 
-test_check_with_output "LD_LIBRARY_PATH includes FIPS OpenSSL" \
+test_check_with_output "LD_LIBRARY_PATH includes system library path" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'env | grep LD_LIBRARY_PATH'" \
-    "/usr/local/openssl/lib64"
+    "/usr/lib/x86_64-linux-gnu"
 
-test_check_with_output "PATH includes FIPS OpenSSL binaries" \
+test_check_with_output "PATH includes system binaries" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'env | grep -E \"^PATH=\"'" \
-    "/usr/local/openssl/bin"
+    "/usr/bin"
 
 echo ""
 
@@ -173,28 +172,28 @@ echo ""
 # Test Suite 3: OpenSSL Provider Verification
 ################################################################################
 echo "================================================================================"
-echo "[3/6] OpenSSL Provider Verification"
+echo "[3/7] OpenSSL Provider Verification"
 echo "================================================================================"
 echo ""
 echo "Verifying OpenSSL loads wolfProvider correctly..."
 echo ""
 
-test_check_with_output "OpenSSL version is 3.0.15" \
+test_check_with_output "OpenSSL version is 3.0.2" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl version'" \
-    "OpenSSL 3\\.0\\.15"
+    "OpenSSL 3\\.0\\.2"
 
 test_check_with_output "wolfProvider is loaded" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -providers | grep -A 5 wolfprov'" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -providers | grep -A 3 \"wolfSSL Provider\"'" \
     "status: active"
 
 test_check "OpenSSL config file exists" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -f /usr/local/openssl/ssl/openssl.cnf'"
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -f /etc/ssl/openssl.cnf'"
 
 test_check "wolfProvider module exists" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -f /usr/local/openssl/lib64/ossl-modules/libwolfprov.so'"
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -f /usr/lib/x86_64-linux-gnu/ossl-modules/libwolfprov.so'"
 
 test_check "wolfProvider config in openssl.cnf" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'grep -q wolfprov /usr/local/openssl/ssl/openssl.cnf'"
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'grep -q wolfprov /etc/ssl/openssl.cnf'"
 
 echo ""
 
@@ -202,7 +201,7 @@ echo ""
 # Test Suite 4: wolfSSL Library Verification
 ################################################################################
 echo "================================================================================"
-echo "[4/6] wolfSSL Library Verification"
+echo "[4/7] wolfSSL Library Verification"
 echo "================================================================================"
 echo ""
 echo "Verifying wolfSSL FIPS library is present and linked..."
@@ -232,7 +231,7 @@ echo ""
 # Test Suite 5: golang-fips/go Integration
 ################################################################################
 echo "================================================================================"
-echo "[5/6] golang-fips/go Integration"
+echo "[5/7] golang-fips/go Integration"
 echo "================================================================================"
 echo ""
 echo "Verifying golang-fips/go toolchain integration..."
@@ -258,7 +257,7 @@ echo ""
 # Test Suite 6: Configuration Files Verification
 ################################################################################
 echo "================================================================================"
-echo "[6/6] Configuration Files Verification"
+echo "[6/7] Configuration Files Verification"
 echo "================================================================================"
 echo ""
 echo "Verifying configuration files are present and valid..."
@@ -277,6 +276,37 @@ test_check "Entrypoint script exists" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -x /app/entrypoint.sh'"
 
 test_check "Runtime directories exist" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -d /var/run/aws-node && test -d /var/log/aws-routed-eni'"
+
+echo ""
+
+################################################################################
+# Test Suite 7: Client Feedback Requirements Validation
+################################################################################
+echo "================================================================================"
+echo "[7/7] Client Feedback Requirements Validation"
+echo "================================================================================"
+echo ""
+echo "Verifying all client feedback requirements are implemented..."
+echo ""
+
+test_check_with_output "OpenSSL 3.0.2 (Ubuntu System OpenSSL)" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl version'" \
+    "OpenSSL 3\\.0\\.2"
+
+test_check_with_output "golang-fips go1.25-fips-release" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'grep -ao \"go1\\.25[.0-9]*\" /app/aws-k8s-agent | head -1'" \
+    "go1\\.25"
+
+test_check_with_output "wolfSSL FIPS v5.8.2" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'grep -ao \"5\\.8\\.[0-9]*\" /usr/lib/x86_64-linux-gnu/libwolfssl.so | head -1'" \
+    "5\\.8\\.2"
+
+test_check_with_output "wolfProvider v1.1.0 active" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -providers | grep -E \"(version: 1\\.1\\.0|status: active)\"'" \
+    "version: 1\\.1\\.0"
+
+test_check "Runtime directories present" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -d /var/run/aws-node && test -d /var/log/aws-routed-eni'"
 
 echo ""
@@ -315,7 +345,7 @@ if [ $FAILED -eq 0 ]; then
     echo "      ↓"
     echo "  golang-fips/go (patches Go crypto/* packages)"
     echo "      ↓"
-    echo "  OpenSSL 3.0.15 (provider architecture)"
+    echo "  OpenSSL 3.0.2 (provider architecture)"
     echo "      ↓"
     echo "  wolfProvider v1.1.0 (OpenSSL → wolfSSL bridge)"
     echo "      ↓"

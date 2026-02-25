@@ -142,12 +142,12 @@ run_test \
 run_test \
     "Entrypoint validates OpenSSL version" \
     "docker run --rm --entrypoint=/app/entrypoint.sh $IMAGE_NAME /bin/bash 2>&1 | head -50" \
-    "OpenSSL version.*3\.0\.15"
+    "OpenSSL version.*3\.0\.2"
 
 run_test \
     "Entrypoint checks wolfProvider" \
     "docker run --rm --entrypoint=/app/entrypoint.sh $IMAGE_NAME /bin/bash 2>&1 | head -50" \
-    "wolfProvider is loaded and active"
+    "wolfProvider.*is loaded and active"
 
 run_test \
     "Entrypoint runs FIPS integrity check" \
@@ -268,7 +268,7 @@ run_test \
 
 run_test \
     "OpenSSL config has wolfProvider" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'grep wolfprov /usr/local/openssl/ssl/openssl.cnf'" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'grep wolfprov /etc/ssl/openssl.cnf'" \
     "wolfprov"
 
 ################################################################################

@@ -45,18 +45,14 @@ echo ""
 # Step 1: Verify environment variables
 log_info "Verifying FIPS environment variables..."
 if [ -z "$OPENSSL_CONF" ]; then
-    log_warning "OPENSSL_CONF not set, using default: /usr/local/openssl/ssl/openssl.cnf"
-    export OPENSSL_CONF="/usr/local/openssl/ssl/openssl.cnf"
+    log_warning "OPENSSL_CONF not set, using default: /etc/ssl/openssl.cnf"
+    export OPENSSL_CONF="/etc/ssl/openssl.cnf"
 fi
 
-if [ -z "$OPENSSL_MODULES" ]; then
-    log_warning "OPENSSL_MODULES not set, using default: /usr/local/openssl/lib64/ossl-modules"
-    export OPENSSL_MODULES="/usr/local/openssl/lib64/ossl-modules"
-fi
+# Note: OPENSSL_MODULES not needed for Ubuntu System OpenSSL (uses default location)
 
 log_success "Environment variables configured"
 echo "  OPENSSL_CONF: $OPENSSL_CONF"
-echo "  OPENSSL_MODULES: $OPENSSL_MODULES"
 echo "  LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
 echo ""
 
@@ -70,11 +66,11 @@ fi
 log_success "OpenSSL version: $OPENSSL_VERSION"
 echo ""
 
-# Step 3: Check wolfProvider
+# Step 3: Check wolfProvider (named "fips" with display name "wolfSSL Provider FIPS")
 log_info "Checking wolfProvider status..."
-if openssl list -providers 2>/dev/null | grep -q "wolfprov"; then
-    log_success "wolfProvider is loaded and active"
-    openssl list -providers | grep -A 3 "wolfprov" || true
+if openssl list -providers 2>/dev/null | grep -qi "wolfSSL Provider"; then
+    log_success "wolfProvider (fips) is loaded and active"
+    openssl list -providers | grep -A 3 "fips" || true
 else
     log_error "wolfProvider is NOT loaded!"
     log_error "Available providers:"

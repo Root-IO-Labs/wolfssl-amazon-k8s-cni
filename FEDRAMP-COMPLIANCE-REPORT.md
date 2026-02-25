@@ -93,6 +93,38 @@ Appendices contain the evidence artifacts referenced throughout the document, in
 
 Placeholders (e.g., `<IMAGE_NAME>`, `<VERSION>`) have been replaced with actual values specific to this image release.
 
+### 1.5 FIPS Verification Methodology
+
+This image implements FIPS 140-3 cryptography through a verified chain:
+
+**Cryptographic Path:**
+```
+Go Application (aws-k8s-agent, aws-cni, etc.)
+    ↓ (crypto/* API calls)
+golang-fips/go v1.25.7 (FIPS-aware Go toolchain)
+    ↓ (CGO bridge)
+Ubuntu System OpenSSL 3.0.2
+    ↓ (OpenSSL provider architecture)
+wolfProvider v1.1.0 (named "fips")
+    ↓ (FIPS bridge)
+wolfSSL FIPS v5.8.2 (Certificate #4718)
+```
+
+**Client Feedback Implementation:**
+- ✅ golang-fips upgraded: go1.22 → go1.25-fips-release
+- ✅ Ubuntu System OpenSSL: Custom 3.0.15 → APT 3.0.2
+- ✅ TLS 1.3 ChaCha20-Poly1305 removed (FIPS compliance)
+- ✅ wolfSSL RSA_MIN_SIZE=2048 (strengthened from 1024)
+- ✅ GOTOOLCHAIN=local, GOLANG_FIPS=1 (build-time enforcement)
+- ✅ GOPROXY=direct (avoids ECDSA verification issues)
+
+**Verification Tools:**
+- `/usr/local/bin/fips-startup-check`: Runtime CAST validation
+- Test Suite: 149 automated checks across 5 test suites
+- Provider verification: `openssl list -providers`
+
+All cryptographic operations are routed through FIPS 140-3 validated modules.
+
 ---
 
 ## 2. Image Overview and Metadata

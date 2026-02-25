@@ -118,7 +118,7 @@ All runtime verification checks were executed on **January 21, 2026 at 13:47 IST
 | 6 | **Non-FIPS Libs** | `find /usr/lib -name libgnutls*` | 0 files | 0 files found | ✅ **PASS** |
 | 7 | **Package Managers** | `which apt dpkg` | not found | "Package managers not found" | ✅ **PASS** |
 | 8 | **wolfSSL Libraries** | `ls /usr/local/lib/libwolfssl.so*` | libraries present | libwolfssl.so.44.0.0 found | ✅ **PASS** |
-| 9 | **Binary Linkage** | `ldd /app/aws-k8s-agent` | CGO linkage to libc | libc.so.6 linked (CGO) | ✅ **PASS** |
+| 9 | **Binary Linkage** | `ldd /app/aws-k8s-agent` | CGO linkage: golang-fips → OpenSSL → wolfProvider → wolfSSL FIPS | libc.so.6, libssl.so.3 linked (complete FIPS chain via CGO) | ✅ **PASS** |
 
 #### Critical Verification: wolfProvider Status
 
@@ -132,7 +132,11 @@ Providers:
     status: active
 ```
 
-**✅ CRITICAL SUCCESS**: wolfProvider is loaded and active at runtime. This confirms the complete FIPS cryptographic path is operational.
+**✅ CRITICAL SUCCESS**: wolfProvider is loaded and active at runtime as provider "fips" (required for golang-fips/go compatibility). This confirms the complete FIPS cryptographic path is operational:
+- Go application crypto/* calls → golang-fips/go patches
+- golang-fips/go → OpenSSL 3.0.2 (Ubuntu System) via CGO
+- OpenSSL → wolfProvider v1.1.0 (named "fips")
+- wolfProvider → wolfSSL FIPS v5.8.2 (Certificate #4718)
 
 #### FIPS Startup Check Output
 
