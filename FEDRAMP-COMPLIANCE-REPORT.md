@@ -112,7 +112,7 @@ wolfSSL FIPS v5.8.2 (Certificate #4718)
 
 **Client Feedback Implementation:**
 - ✅ golang-fips upgraded: go1.22 → go1.25-fips-release
-- ✅ Ubuntu System OpenSSL: Custom 3.0.15 → APT 3.0.2
+- ✅ Ubuntu System OpenSSL: Custom 3.0.2 → APT 3.0.2
 - ✅ TLS 1.3 ChaCha20-Poly1305 removed (FIPS compliance)
 - ✅ wolfSSL RSA_MIN_SIZE=2048 (strengthened from 1024)
 - ✅ GOTOOLCHAIN=local, GOLANG_FIPS=1 (build-time enforcement)
@@ -139,7 +139,7 @@ All cryptographic operations are routed through FIPS 140-3 validated modules.
 | **Kernel Compatibility** | Linux 4.14+ (AWS-optimized kernels recommended) |
 | **FIPS Module** | wolfSSL FIPS v5.8.2-v5.2.3 |
 | **FIPS Certificate** | #4718 (CMVP Validated) |
-| **OpenSSL Version** | 3.0.15 (September 3, 2024) |
+| **OpenSSL Version** | 3.0.2 (September 3, 2024) |
 | **wolfProvider Version** | 1.1.0 |
 | **Build Date** | January 19, 2026 15:57:25 UTC |
 | **Image Digest** | sha256:6979a7cd18bfad03f08bc635faaf8e4738ff085bf47591ee1f7454d2984caddf |
@@ -211,7 +211,7 @@ This FIPS-hardened build achieves:
 ┌─────────────────────────────────────────────────────────────────────┐
 │  FIPS Cryptographic Boundary (FIPS 140-3 Validated)                │
 │  ┌───────────────────────────────────────────────────────────────┐ │
-│  │  OpenSSL 3.0.15 (FIPS module enabled)                         │ │
+│  │  OpenSSL 3.0.2 (FIPS module enabled)                         │ │
 │  │  ├─ Provider: wolfprov (wolfSSL Provider FIPS v1.1.0)        │ │
 │  │  ├─ Module: wolfSSL FIPS v5.8.2 (Cert #4718)                 │ │
 │  │  ├─ Known Answer Tests (CAST): Executed on startup           │ │
@@ -254,7 +254,7 @@ This FIPS-hardened build achieves:
 | **aws-k8s-agent** | IPAM daemon (pod IP allocation) | Linked to libc (CGO-enabled) for FIPS crypto |
 | **aws-cni** | CNI plugin binary | CGO-enabled, uses FIPS OpenSSL for TLS |
 | **aws-vpc-cni** | VPC networking integration | CGO-enabled, FIPS crypto for AWS API calls |
-| **OpenSSL 3.0.15** | Cryptographic library | FIPS module configured via OPENSSL_CONF |
+| **OpenSSL 3.0.2** | Cryptographic library | FIPS module configured via OPENSSL_CONF |
 | **wolfProvider** | OpenSSL 3.x provider | Bridges OpenSSL → wolfSSL FIPS module |
 | **wolfSSL FIPS** | FIPS-validated crypto module | Certificate #4718, runtime CAST verification |
 
@@ -307,7 +307,7 @@ Container images must be carefully configured to:
 ```
 Application (Go binaries with CGO)
     ↓
-OpenSSL 3.0.15 (libssl, libcrypto)
+OpenSSL 3.0.2 (libssl, libcrypto)
     ↓
 wolfProvider v1.1.0 (OpenSSL 3.x provider plugin)
     ↓
@@ -326,7 +326,7 @@ The validated OE for wolfSSL FIPS Certificate #4718 includes Linux operating sys
 
 **Definition:**
 
-The cryptographic boundary encompasses the wolfSSL FIPS module (libwolfssl.so.44) and its integration with OpenSSL 3.0.15 via wolfProvider.
+The cryptographic boundary encompasses the wolfSSL FIPS module (libwolfssl.so.44) and its integration with OpenSSL 3.0.2 via wolfProvider.
 
 **Boundary Preservation:**
 
@@ -396,13 +396,13 @@ FIPS mode is enabled through a combination of environment variables, configurati
 **1. Environment Variables (Pre-configured in Dockerfile):**
 
 ```bash
-OPENSSL_CONF=/usr/local/openssl/ssl/openssl.cnf
-OPENSSL_MODULES=/usr/local/openssl/lib64/ossl-modules
-LD_LIBRARY_PATH=/usr/local/openssl/lib64:/usr/local/openssl/lib:/usr/local/lib:...
-PATH=/usr/local/openssl/bin:$PATH
+OPENSSL_CONF=/etc/ssl/openssl.cnf
+OPENSSL_MODULES=/usr/lib/x86_64-linux-gnu/ossl-modules
+LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/lib:...
+PATH=/usr/bin:$PATH
 ```
 
-**2. OpenSSL Configuration File (`/usr/local/openssl/ssl/openssl.cnf`):**
+**2. OpenSSL Configuration File (`/etc/ssl/openssl.cnf`):**
 
 ```ini
 openssl_conf = openssl_init
@@ -416,7 +416,7 @@ wolfprov = wolfprov_sect
 
 [wolfprov_sect]
 activate = 1
-module = /usr/local/openssl/lib64/ossl-modules/wolfprov.so
+module = /usr/lib/x86_64-linux-gnu/ossl-modules/wolfprov.so
 ```
 
 **3. Entrypoint Script (`/app/entrypoint.sh`):**
@@ -566,7 +566,7 @@ libc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x00007fdf90a00000)
 **Library Path Configuration:**
 
 ```bash
-LD_LIBRARY_PATH=/usr/local/openssl/lib64:/usr/local/openssl/lib:/usr/local/lib:/usr/lib/x86_64-linux-gnu:/usr/lib
+LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/lib:/usr/lib
 ```
 
 **Ensures:**
@@ -585,8 +585,8 @@ LD_LIBRARY_PATH=/usr/local/openssl/lib64:/usr/local/openssl/lib:/usr/local/lib:/
 ```bash
 $ docker run --rm rootioinc/amazon-k8s-cni:v1.21.1-ubuntu-22.04-fips ldconfig -p | grep -i openssl
 
-libssl.so.3 (libc6,x86-64) => /usr/local/openssl/lib64/libssl.so.3
-libcrypto.so.3 (libc6,x86-64) => /usr/local/openssl/lib64/libcrypto.so.3
+libssl.so.3 (libc6,x86-64) => /usr/lib/x86_64-linux-gnu/libssl.so.3
+libcrypto.so.3 (libc6,x86-64) => /usr/lib/x86_64-linux-gnu/libcrypto.so.3
 ```
 
 **FedRAMP Control**: **CM-6 (Configuration Settings)**
@@ -670,15 +670,15 @@ $ docker run --rm rootioinc/amazon-k8s-cni:v1.21.1-ubuntu-22.04-fips \
 **Build Process**:
 ```bash
 # Example: iptables rebuild
-./configure --with-ssl=/usr/local/openssl
-make CFLAGS="-I/usr/local/openssl/include" LDFLAGS="-L/usr/local/openssl/lib64"
+./configure --with-ssl=/usr
+make CFLAGS="-I/usr/include" LDFLAGS="-L/usr/lib/x86_64-linux-gnu"
 make install
 ```
 
 **Verification**:
 ```bash
 $ docker run --rm rootioinc/amazon-k8s-cni:v1.21.1-ubuntu-22.04-fips ldd /usr/sbin/iptables | grep ssl
-libssl.so.3 => /usr/local/openssl/lib64/libssl.so.3
+libssl.so.3 => /usr/lib/x86_64-linux-gnu/libssl.so.3
 ```
 
 **Result**: ✅ iptables linked to FIPS OpenSSL
@@ -748,7 +748,7 @@ MinProtocol = TLSv1.2
    - Non-FIPS library removal confirmation
 
 3. **Configuration Files** (Appendix A, Section A.3)
-   - `/usr/local/openssl/ssl/openssl.cnf`
+   - `/etc/ssl/openssl.cnf`
    - `/app/entrypoint.sh`
    - `/usr/local/bin/fips-startup-check`
 
@@ -1850,8 +1850,8 @@ syft rootioinc/amazon-k8s-cni:v1.21.1-ubuntu-22.04-fips \
     {
       "type": "library",
       "name": "openssl",
-      "version": "3.0.15",
-      "purl": "pkg:deb/ubuntu/openssl@3.0.15",
+      "version": "3.0.2",
+      "purl": "pkg:deb/ubuntu/openssl@3.0.2",
       "licenses": [{"license": {"id": "Apache-2.0"}}]
     },
     {
