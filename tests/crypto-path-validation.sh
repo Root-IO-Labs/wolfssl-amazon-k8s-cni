@@ -318,12 +318,12 @@ echo "==========================================================================
 echo "[8/8] Runtime Library Loading Verification"
 echo "================================================================================"
 echo ""
-echo "Verifying libraries are actually loaded at runtime (not just installed)..."
+echo "Verifying FIPS libraries are loaded by aws-k8s-agent at runtime..."
 echo ""
 
-# Start a container in the background running a simple command that keeps it alive
-echo -n "  Starting container for runtime verification ... "
-CONTAINER_ID=$(docker run -d --entrypoint=/bin/bash $IMAGE_NAME -c 'while true; do sleep 1; done' 2>/dev/null)
+# Start a container in the background with the actual application running
+echo -n "  Starting container with aws-k8s-agent for runtime verification ... "
+CONTAINER_ID=$(docker run -d --entrypoint=/bin/bash $IMAGE_NAME -c '/app/aws-k8s-agent > /tmp/aws-k8s-agent.log 2>&1 & sleep 3; while true; do sleep 1; done' 2>/dev/null)
 if [ -z "$CONTAINER_ID" ]; then
     echo -e "${RED}✗ FAIL${NC}"
     echo "    Could not start container for runtime verification"
@@ -332,33 +332,43 @@ else
     echo -e "${GREEN}✓ STARTED${NC}"
     PASSED=$((PASSED + 1))
 
-    # Give the container a moment to start
-    sleep 2
+    # Give the container a moment to start the application
+    sleep 3
 
-    # Get PID of a running process inside the container (bash)
-    echo -n "  Getting PID of running process ... "
-    PID=$(docker exec $CONTAINER_ID pidof bash | awk '{print $1}')
+    # Get PID of the actual application process (aws-k8s-agent or aws-vpc-cni)
+    echo -n "  Getting PID of aws-k8s-agent process ... "
+    PID=$(docker exec $CONTAINER_ID pidof aws-k8s-agent 2>/dev/null | awk '{print $1}')
+
+    # Fallback: try aws-vpc-cni if aws-k8s-agent not found
+    if [ -z "$PID" ]; then
+        PID=$(docker exec $CONTAINER_ID pidof aws-vpc-cni 2>/dev/null | awk '{print $1}')
+    fi
     if [ -z "$PID" ]; then
         echo -e "${RED}✗ FAIL${NC}"
+        echo "    Could not find aws-k8s-agent or aws-vpc-cni process"
+        echo "    The application may have crashed. Check logs with:"
+        echo "    docker exec $CONTAINER_ID cat /tmp/aws-k8s-agent.log"
         FAILED=$((FAILED + 1))
     else
-        echo -e "${GREEN}✓ FOUND${NC} (PID: $PID)"
+        # Determine which process we found
+        PROCESS_NAME=$(docker exec $CONTAINER_ID ps -p $PID -o comm= 2>/dev/null)
+        echo -e "${GREEN}✓ FOUND${NC} (PID: $PID, Process: $PROCESS_NAME)"
         PASSED=$((PASSED + 1))
 
-        # Check /proc/$PID/maps for actually loaded libraries
-        echo -n "  Checking /proc/$PID/maps for wolfSSL library ... "
+        # Check /proc/$PID/maps for actually loaded libraries in the application process
+        echo -n "  Checking $PROCESS_NAME process memory for wolfSSL library ... "
         if docker exec $CONTAINER_ID cat /proc/$PID/maps 2>/dev/null | grep -q "libwolfssl.so"; then
-            echo -e "${GREEN}✓ PASS${NC} (libwolfssl.so loaded in memory)"
+            echo -e "${GREEN}✓ PASS${NC} (libwolfssl.so loaded in application memory)"
             PASSED=$((PASSED + 1))
         else
             echo -e "${YELLOW}⚠ INFO${NC} (wolfSSL loaded via dlopen, may not show in maps)"
             # This is not necessarily a failure - libraries loaded via dlopen may not always show in maps
         fi
 
-        # Check for OpenSSL libraries
-        echo -n "  Checking /proc/$PID/maps for OpenSSL library ... "
+        # Check for OpenSSL libraries in the application process
+        echo -n "  Checking $PROCESS_NAME process memory for OpenSSL library ... "
         if docker exec $CONTAINER_ID cat /proc/$PID/maps 2>/dev/null | grep -qE "libssl.so|libcrypto.so"; then
-            echo -e "${GREEN}✓ PASS${NC} (OpenSSL libs loaded in memory)"
+            echo -e "${GREEN}✓ PASS${NC} (OpenSSL libs loaded in application memory)"
             PASSED=$((PASSED + 1))
         else
             echo -e "${YELLOW}⚠ INFO${NC} (OpenSSL loaded via dlopen by golang-fips)"
