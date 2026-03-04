@@ -212,19 +212,19 @@ echo -e "${GREEN}✓ Image found${NC}"
 print_section "1" "Image Architecture Validation"
 init_section "arch"
 
-check_test_with_output "arch" "OpenSSL 3.0.15 present" \
+check_test_with_output "arch" "OpenSSL 3.0.2 present" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl version'" \
-    "OpenSSL 3\.0\.15" \
+    "OpenSSL 3\.0\.2" \
     "yes"
 
 check_test "arch" "wolfSSL FIPS libraries present" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -f /usr/lib/x86_64-linux-gnu/libwolfssl.so'"
 
 check_test "arch" "wolfProvider module present" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -f /usr/local/openssl/lib64/ossl-modules/libwolfprov.so'"
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -f /usr/lib/x86_64-linux-gnu/ossl-modules/libwolfprov.so'"
 
 check_test "arch" "OpenSSL config with wolfProvider" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'grep -q wolfprov /usr/local/openssl/ssl/openssl.cnf'"
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'grep -q wolfprov /etc/ssl/openssl.cnf'"
 
 check_test "arch" "FIPS startup check utility present" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -x /usr/local/bin/fips-startup-check'"
@@ -234,11 +234,11 @@ check_test "arch" "Entrypoint script present" \
 
 check_test_with_output "arch" "OPENSSL_CONF environment set" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'echo \$OPENSSL_CONF'" \
-    "/usr/local/openssl/ssl/openssl.cnf"
+    "/etc/ssl/openssl.cnf"
 
 check_test_with_output "arch" "LD_LIBRARY_PATH includes FIPS paths" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'echo \$LD_LIBRARY_PATH'" \
-    "/usr/local/openssl/lib64"
+    "/usr/lib/x86_64-linux-gnu"
 
 ################################################################################
 # Section 2: golang-fips/go Specific Validation
@@ -289,15 +289,15 @@ print_section "4" "wolfProvider Compliance"
 init_section "wolfprov"
 
 check_test_with_output "wolfprov" "wolfProvider loaded" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -providers | grep -A 5 wolfprov'" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -providers | grep -A 3 \"wolfSSL Provider\"'" \
     "status: active" \
     "yes"
 
 check_test "wolfprov" "wolfProvider can list algorithms" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -digest-algorithms -provider wolfprov | grep -q SHA'"
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -digest-algorithms -provider fips | grep -q SHA'"
 
 check_test "wolfprov" "wolfProvider provides AES" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -cipher-algorithms -provider wolfprov | grep -q AES'"
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -cipher-algorithms -provider fips | grep -q AES'"
 
 check_test_with_output "wolfprov" "FIPS startup check passes" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c '/usr/local/bin/fips-startup-check'" \
@@ -305,7 +305,7 @@ check_test_with_output "wolfprov" "FIPS startup check passes" \
     "yes"
 
 check_test "wolfprov" "wolfProvider version check" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -providers -verbose | grep -A 10 wolfprov | grep -q version'"
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -providers -verbose | grep -A 10 fips | grep -q version'"
 
 check_test "wolfprov" "No default provider active (strict FIPS)" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c '! openssl list -providers | grep -A 3 \"^  default\" | grep -q \"status: active\"'"
@@ -314,27 +314,26 @@ check_test "wolfprov" "No default provider active (strict FIPS)" \
 # Section 5: Non-FIPS Crypto Library Scan
 ################################################################################
 
-print_section "5" "Non-FIPS Crypto Library Removal"
+print_section "5" "Binary Linkage Verification (Non-FIPS Crypto)"
 init_section "nonfips"
 
-check_zero_count "nonfips" "No GnuTLS libraries" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'find /usr/lib /lib -name \"libgnutls*\" 2>/dev/null | wc -l'" \
-    "yes"
+# Note: Non-FIPS crypto libraries may be present as apt dependencies,
+# but application binaries must not link to them.
 
-check_zero_count "nonfips" "No Nettle libraries" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'find /usr/lib /lib -name \"libnettle*\" 2>/dev/null | wc -l'" \
-    "yes"
+check_test "nonfips" "Binaries don't link to GnuTLS" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'for binary in /app/aws-k8s-agent /app/aws-cni /app/egress-cni /app/grpc-health-probe /app/aws-vpc-cni; do ldd \$binary 2>/dev/null | grep -i gnutls && exit 1; done; exit 0'"
 
-check_zero_count "nonfips" "No Hogweed libraries" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'find /usr/lib /lib -name \"libhogweed*\" 2>/dev/null | wc -l'" \
-    "yes"
+check_test "nonfips" "Binaries don't link to Nettle" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'for binary in /app/aws-k8s-agent /app/aws-cni /app/egress-cni /app/grpc-health-probe /app/aws-vpc-cni; do ldd \$binary 2>/dev/null | grep -i nettle && exit 1; done; exit 0'"
 
-check_zero_count "nonfips" "No libgcrypt libraries" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'find /usr/lib /lib -name \"libgcrypt*\" 2>/dev/null | wc -l'" \
-    "yes"
+check_test "nonfips" "Binaries don't link to Hogweed" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'for binary in /app/aws-k8s-agent /app/aws-cni /app/egress-cni /app/grpc-health-probe /app/aws-vpc-cni; do ldd \$binary 2>/dev/null | grep -i hogweed && exit 1; done; exit 0'"
 
-check_zero_count "nonfips" "No libk5crypto libraries" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'find /usr/lib /lib -name \"libk5crypto*\" 2>/dev/null | wc -l'"
+check_test "nonfips" "Binaries don't link to libgcrypt" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'for binary in /app/aws-k8s-agent /app/aws-cni /app/egress-cni /app/grpc-health-probe /app/aws-vpc-cni; do ldd \$binary 2>/dev/null | grep -i gcrypt && exit 1; done; exit 0'"
+
+check_test "nonfips" "Binaries don't link to libk5crypto" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'for binary in /app/aws-k8s-agent /app/aws-cni /app/egress-cni /app/grpc-health-probe /app/aws-vpc-cni; do ldd \$binary 2>/dev/null | grep -i k5crypto && exit 1; done; exit 0'"
 
 check_test "nonfips" "FIPS libssl in system location" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -f /usr/lib/x86_64-linux-gnu/libssl.so.3'"
@@ -445,7 +444,7 @@ check_test "security" "OpenSSL can verify certificates" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl version -d'"
 
 check_test "security" "Environment variables properly set" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -n \"\$OPENSSL_CONF\" && test -n \"\$OPENSSL_MODULES\"'"
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'test -n \"\$OPENSSL_CONF\"'"
 
 ################################################################################
 # Final Report

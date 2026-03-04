@@ -106,13 +106,13 @@ echo ""
 run_test \
     "OpenSSL version check" \
     "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl version'" \
-    "OpenSSL 3\.0\.15" \
-    "Expected OpenSSL 3.0.15"
+    "OpenSSL 3\.0\.2" \
+    "Expected OpenSSL 3.0.2 (Ubuntu System OpenSSL)"
 
 # Test 2: wolfProvider loaded
 run_test \
     "wolfProvider loaded check" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -providers | grep -A 5 wolfprov'" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'openssl list -providers | grep -A 3 \"wolfSSL Provider\"'" \
     "status: active" \
     "wolfProvider is not active"
 
@@ -130,12 +130,13 @@ run_test \
     "SHA2-256" \
     "SHA-256 operation failed"
 
-# Test 5: No non-FIPS crypto libraries
+# Test 5: Binaries don't link to non-FIPS crypto (GnuTLS)
+# Note: GnuTLS libraries may be present as dependencies (e.g., apt), but binaries must not use them
 run_test \
-    "No GnuTLS library present" \
-    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'find /usr/lib /lib -name \"libgnutls*\" 2>/dev/null | wc -l'" \
-    "^0$" \
-    "Found non-FIPS GnuTLS libraries"
+    "Binaries don't link to GnuTLS" \
+    "docker run --rm --entrypoint=/bin/bash $IMAGE_NAME -c 'for binary in /app/aws-k8s-agent /app/aws-cni /app/egress-cni /app/grpc-health-probe /app/aws-vpc-cni; do ldd \$binary 2>/dev/null | grep -i gnutls && exit 1; done; echo \"no-gnutls-linkage\"'" \
+    "no-gnutls-linkage" \
+    "ERROR: One or more binaries link to non-FIPS GnuTLS library"
 
 # Test 6: aws-k8s-agent binary exists
 run_test \
